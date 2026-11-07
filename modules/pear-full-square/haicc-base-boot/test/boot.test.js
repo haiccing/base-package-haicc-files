@@ -112,6 +112,9 @@ test('the setup: a self-extracting release, extracting haiccing/ (boot, sources,
     mkdirSync(join(dir, 'rt'))
     const rt = runtime(join(dir, 'rt'))
     writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: 'base-package-haicc', pkgm: { package: 'haicc', hash: 'abcdef1234567890' } }))
+    // The package manager's package beside it: the platform is a pair.
+    mkdirSync(join(dir, 'base-package-pkgm', 'modules'), { recursive: true })
+    writeFileSync(join(dir, 'base-package-pkgm', 'package.json'), JSON.stringify({ name: 'base-package-pkgm', pkgm: { package: 'pkgm', hash: '1234567890abcdef' } }))
     const rel = run('sh', [join(here, 'release.sh'), pkg, join(dir, 'haicc-setup.sh'), rt])
     t.is(rel.status, 0, rel.stdout + rel.stderr)
     t.ok(/Bare v1\.36\.0/.test(rel.stdout), 'the runtime it carries, said')
@@ -134,11 +137,13 @@ test('the setup: a self-extracting release, extracting haiccing/ (boot, sources,
     const logs = readdirSync(join(work, 'log'))
     t.is(logs.length, 1)
     t.ok(/^\d{8}T\d{6}Z\.log$/.test(logs[0]))
-    t.ok(/^== \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ sh \S*haicc-setup\.sh .*\nhaicc-setup: base-package-haicc abcdef123456 .*\n(.*\n)*== exit 0, \d+ s\n$/.test(readFileSync(join(work, 'log', logs[0]), 'utf8')))
+    t.ok(/^== \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ sh \S*haicc-setup\.sh .*\nhaicc-setup: base-package-haicc abcdef123456 .*\n(.*\n)*== exit 0, \d+(\.\d)? s\n$/.test(readFileSync(join(work, 'log', logs[0]), 'utf8')))
     // The first boot's stage 1, on a folder with no packages/ yet: the
     // runtime checked, HAICC's package copied in whole (hard links).
     const stage1 = run('sh', [join(work, 'boot')], { env: { ...process.env, HAICC_BOOT_LOGGING: '1' } })
     t.is(stage1.status, 0, stage1.stdout + stage1.stderr)
+    t.ok(existsSync(join(work, 'haiccing', 'base-package-pkgm', 'package.json')), 'the setup carries the pair')
+    t.ok(existsSync(join(work, 'packages', 'base-package-pkgm', 'package.json')), 'the cold boot copies the pair in')
     const inPackages = join(work, 'packages', 'base-package-haicc', 'modules', 'pear-full-square', 'haicc-base-boot', 'haicc.js')
     t.ok(existsSync(inPackages), stage1.stdout + stage1.stderr)
     t.is(statSync(inPackages).ino, statSync(join(work, 'haiccing', 'base-package-haicc', 'modules', 'pear-full-square', 'haicc-base-boot', 'haicc.js')).ino, 'a hard link: no space taken twice')
@@ -167,16 +172,49 @@ test('the setup: a self-extracting release, extracting haiccing/ (boot, sources,
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('a path for a name is refused, not cleaned into one name: a node is its swarm\'s', (t) => {
+test('a path for a name is refused where it names a swarm\'s node; a strict swarm\'s nodes are its package\'s', (t) => {
   const work = mkdtempSync(join(tmpdir(), 'names-'))
+  const haicc = (args, swarm = '') => run(process.execPath, [join(here, 'haicc.js'), ...args], { env: { ...process.env, HAICC_WORK: work, HAICC_SWARM: swarm } })
   try {
-    const r = run(process.execPath, [join(here, 'haicc.js'), 'boot', 'hosts/master'], { env: { ...process.env, HAICC_WORK: work, HAICC_SWARM: '' } })
+    mkdirSync(join(work, 'hosts'))
+    writeFileSync(join(work, 'swarms.json'), JSON.stringify({ swarms: { hosts: { package: 'base-x', swarm: 'hosts', strict: true } } }))
+    writeFileSync(join(work, 'hosts', 'nodes.json'), JSON.stringify({ swarm: 'hosts', nodes: { master: { role: 'master' } } }))
+    const r = haicc(['boot', 'hosts/master'])
     t.is(r.status, 2)
     t.ok(/'hosts\/master': one swarm's name here; a node is its swarm's: hosts\/haicc boot master/.test(r.stdout))
-    t.ok(!existsSync(join(work, 'swarms.json')) && !existsSync(join(work, 'hosts-master')), 'nothing made')
-    const s = run(process.execPath, [join(here, 'haicc.js'), 'teardown', 'a/b'], { env: { ...process.env, HAICC_WORK: work, HAICC_SWARM: 'hosts' } })
-    t.is(s.status, 2)
-    t.ok(/one node's name here \(hosts\/haicc teardown <node>\)/.test(s.stdout))
+    t.ok(!existsSync(join(work, 'hosts-master')), 'nothing made')
+    const s = haicc(['teardown', 'master'], 'hosts')
+    t.is(s.status, 1, 'strict: no node torn down by hand')
+    t.ok(/the swarm hosts is strict/.test(s.stdout))
+    const b = haicc(['boot', 'node-9'], 'hosts')
+    t.is(b.status, 1)
+    t.ok(/strict: its nodes are its package's \(nodes.json: master\), node-9 is not one/.test(b.stdout), 'strict: a node not in nodes.json refused')
+    const p = haicc(['teardown', 'a/b'], 'hosts')
+    t.is(p.status, 2)
+    t.ok(/one node's name here \(hosts\/haicc teardown <node>\)/.test(p.stdout))
+  } finally { rmSync(work, { recursive: true, force: true }) }
+})
+
+test('a package\'s swarms: refused when not intact, not there, or --as with several', (t) => {
+  const work = mkdtempSync(join(tmpdir(), 'deploy-'))
+  const put = (f, x) => { mkdirSync(dirname(join(work, f)), { recursive: true }); writeFileSync(join(work, f), typeof x === 'string' ? x : JSON.stringify(x)) }
+  const haicc = args => run(process.execPath, [join(here, 'haicc.js'), ...args], { env: { ...process.env, HAICC_WORK: work, HAICC_SWARM: '' } })
+  try {
+    put('haiccing/base-x/package.json', { name: 'base-x', pkgm: { package: 'x', hash: 'abc' } })
+    put('haiccing/base-x/swarms/a/nodes.json', { nodes: { master: { role: 'master' } } })
+    const c = haicc(['boot', 'base-x'])
+    t.is(c.status, 1)
+    t.ok(/The package base-x: changed since it was written.*not deployed/.test(c.stdout), 'sealed and changed: refused')
+    put('dev/base-y/swarms/a/nodes.json', { nodes: { master: { role: 'master' } } })
+    put('dev/base-y/swarms/b/nodes.json', { nodes: { master: { role: 'master' } } })
+    const m = haicc(['boot', 'base-y', '--from=dev', '--as=z'])
+    t.is(m.status, 2)
+    t.ok(/no hash recorded: mixed/.test(m.stdout), 'from --from without a hash: mixed, said')
+    t.ok(/--as names a single swarm; base-y has 2 \(a, b\)/.test(m.stdout))
+    const n = haicc(['boot', 'base-y/c', '--from=dev'])
+    t.is(n.status, 1)
+    t.ok(/no swarm c in it \(swarms\/: a, b\)/.test(n.stdout))
+    t.ok(!existsSync(join(work, 'swarms.json')), 'nothing made')
   } finally { rmSync(work, { recursive: true, force: true }) }
 })
 

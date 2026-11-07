@@ -1,6 +1,6 @@
 {
   "name": "base-package-haicc",
-  "description": "HAICC, the platform: its boot (haicc-base-boot), declaring and reconciling (haicc-reconcile), the lifecycle (haicc-deployment) and the package manager (pkgm-base-manager). The entry: everything starts here. On Bare: it carries Bare's runtime.",
+  "description": "HAICC, the platform's levels: its boot (haicc-base-boot), declaring and reconciling (haicc-reconcile), the lifecycle (haicc-deployment). With the package manager (base-package-pkgm), the platform's pair: HAICC uses it from beside it. On Bare.",
   "private": true,
   "license": "MIT",
   "pkgm": {
@@ -9,8 +9,7 @@
       "ours": [
         "pear-full-square/haicc-base-boot",
         "pear-full-square/haicc-deployment",
-        "pear-full-square/haicc-reconcile",
-        "pear-full-square/pkgm-base-manager"
+        "pear-full-square/haicc-reconcile"
       ],
       "third": 75
     },
@@ -25,12 +24,6 @@
       "validation"
     ],
     "platform": true,
-    "unresolved": [
-      "pear-full-square/pkgm-base-manager: bmod",
-      "pear-full-square/pkgm-base-manager: dep-x",
-      "pear-full-square/pkgm-base-manager: dep-z",
-      "pear-full-square/pkgm-base-manager: dep-y"
-    ],
-    "hash": "434506b82414c3a41215731422946fffa3c9aaae3a76381787d65cfb8ee97dd6"
+    "hash": "d6820bbf52dd1830d3d561341a541d2645c6dea78b00e7a1c173ca2c6b336aed"
   }
 }
